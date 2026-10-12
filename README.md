@@ -1,4 +1,15 @@
 # UTS Pengkodean dan Pemrograman
+## Identitas tugas
+
+| Keterangan | Detail |
+|---|---|
+| Nama | Marita Widya Ratnasari |
+| NIM | 12030124130102 |
+| Mata Kuliah | Pengkodean dan Pemrograman |
+| Kelas | D |
+| Dosen Pengampu | Dr. Totok Dewayanto, S.E., M.Si., Akt. |
+
+**Disusun untuk memenuhi Tugas Project UTS Pengkodean dan Pemrograman.**
 
 Kumpulan kode sumber untuk tiga studi kasus UTS:
 1. **General Ledger** — skema relasional, constraint, dan validasi keseimbangan jurnal ketika posting.
