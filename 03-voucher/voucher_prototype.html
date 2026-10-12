@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Voucher Kas Keluar</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 text-slate-800">
+  <main class="mx-auto max-w-6xl p-6">
+    <header class="mb-6">
+      <p class="text-sm font-semibold text-blue-700">MODUL GENERAL LEDGER</p>
+      <h1 class="text-2xl font-bold">Voucher Entri Transaksi Kas Keluar</h1>
+      <p class="text-sm text-slate-500">Total debit harus sama dengan total kredit.</p>
+    </header>
+    <form id="voucherForm" class="space-y-5 rounded-2xl bg-white p-5 shadow">
+      <div class="grid gap-4 md:grid-cols-3">
+        <label class="text-sm">Nomor voucher
+          <input id="voucherNo" required class="mt-1 w-full rounded-lg border p-2"
+            placeholder="KK-2026-001">
+        </label>
+        <label class="text-sm">Tanggal transaksi
+          <input id="trxDate" type="date" required class="mt-1 w-full rounded-lg border p-2">
+        </label>
+        <label class="text-sm">Deskripsi
+          <input id="description" required maxlength="250"
+            class="mt-1 w-full rounded-lg border p-2" placeholder="Pembayaran ...">
+        </label>
+      </div>
+      <div class="overflow-x-auto rounded-lg border">
+        <table class="w-full min-w-[820px] text-sm">
+          <thead class="bg-slate-100 text-left">
+            <tr><th class="p-2">Akun</th><th class="p-2">Keterangan</th>
+              <th class="p-2">Debit (Rp)</th><th class="p-2">Kredit (Rp)</th>
+              <th class="p-2">Aksi</th></tr>
+          </thead>
+          <tbody id="lineRows"></tbody>
+        </table>
+      </div>
+      <button id="addLine" type="button"
+        class="rounded-lg border px-3 py-2 text-sm font-semibold">+ Tambah baris</button>
+      <div class="grid gap-3 rounded-xl bg-slate-50 p-4 md:grid-cols-3">
+        <p>Total Debit: <strong id="totalDebit">Rp0,00</strong></p>
+        <p>Total Kredit: <strong id="totalCredit">Rp0,00</strong></p>
+        <p id="difference" class="font-semibold">Selisih: Rp0,00</p>
+      </div>
+      <p id="balanceStatus" role="status" class="rounded-lg bg-amber-50 p-3 text-sm">
+        Lengkapi jurnal agar dapat diposting.
+      </p>
+      <p id="errorMessage" class="text-sm text-red-700" role="alert"></p>
+      <button id="submitButton" type="submit" disabled
+        class="rounded-lg bg-blue-700 px-5 py-3 font-semibold text-white
+               disabled:cursor-not-allowed disabled:bg-slate-300">
+        Submit / Posting Voucher
+      </button>
+    </form>
+  </main>
+<script>
+const accounts = [
+  { code: '1110', name: 'Kas Kecil', cash: true },
+  { code: '1120', name: 'Bank / Giro', cash: true },
+  { code: '2100', name: 'Utang Usaha', cash: false },
+  { code: '5100', name: 'Beban Operasional', cash: false },
+  { code: '1510', name: 'Perlengkapan', cash: false },
+  { code: '1600', name: 'Aset Tetap', cash: false },
+  { code: '6100', name: 'Beban Bunga', cash: false }
+];
+const form = document.querySelector('#voucherForm');
+const lineRows = document.querySelector('#lineRows');
+const submitButton = document.querySelector('#submitButton');
+let submitting = false;
+let successMessage = '';
+const rupiah = cents => new Intl.NumberFormat('id-ID', {
+  style: 'currency', currency: 'IDR'
+}).format(cents / 100);
+const toCents = value => {
+  const amount = Number(value || 0);
+  return Number.isFinite(amount) ? Math.round(amount * 100) : 0;
+};
+function userChanged() { successMessage = ''; recalculate(); }
+
+function addRow() {
+  const tr = document.createElement('tr');
+  tr.className = 'border-t';
+  const options = accounts.map(a =>
+    `<option value="${a.code}" data-cash="${a.cash}">${a.code} - ${a.name}</option>`
+  ).join('');
+  tr.innerHTML = `
+    <td class="p-2"><select required class="account w-56 rounded border p-2">
+      <option value="">Pilih akun</option>${options}</select></td>
+    <td class="p-2"><input class="memo w-40 rounded border p-2" maxlength="150"></td>
+    <td class="p-2"><input class="debit w-32 rounded border p-2" type="number"
+      min="0" step="0.01" value="0" inputmode="decimal"></td>
+    <td class="p-2"><input class="credit w-32 rounded border p-2" type="number"
+      min="0" step="0.01" value="0" inputmode="decimal"></td>
+    <td class="p-2"><button type="button" class="remove text-red-700">Hapus</button></td>`;
+  tr.querySelectorAll('input, select').forEach(el => {
+    el.addEventListener('input', userChanged);
+    el.addEventListener('change', userChanged);
+  });
+  tr.querySelector('.remove').addEventListener('click', () => {
+    successMessage = ''; tr.remove(); recalculate();
+  });
+  lineRows.appendChild(tr);
+  recalculate();
+}
+
+function recalculate() {
+  let debitTotal = 0, creditTotal = 0, cashCredit = 0, cashDebit = 0;
+  let validLines = lineRows.querySelectorAll('tr').length >= 2;
+
+  for (const tr of lineRows.querySelectorAll('tr')) {
+    const account = tr.querySelector('.account');
+    const debitInput = tr.querySelector('.debit');
+    const creditInput = tr.querySelector('.credit');
+    const debit = toCents(debitInput.value);
+    const credit = toCents(creditInput.value);
+    const selected = account.selectedOptions[0];
+    const isCash = selected && selected.dataset.cash === 'true';
+    debitTotal += debit;
+    creditTotal += credit;
+    if (isCash) { cashDebit += debit; cashCredit += credit; }
+    const valuesValid = debitInput.value !== '' && creditInput.value !== '' &&
+      Number(debitInput.value) >= 0 && Number(creditInput.value) >= 0;
+    const oneSideOnly = (debit > 0 && credit === 0) ||
+                        (credit > 0 && debit === 0);
+    if (!account.value || !valuesValid || !oneSideOnly) validLines = false;
+  }
+
+  const balanced = debitTotal === creditTotal && debitTotal > 0;
+  const cashOut = cashCredit > 0 && cashDebit === 0;
+  const headerValid = document.querySelector('#voucherNo').value.trim() &&
+    document.querySelector('#trxDate').value &&
+    document.querySelector('#description').value.trim();
+  const valid = Boolean(headerValid && validLines && balanced && cashOut);
+
+  document.querySelector('#totalDebit').textContent = rupiah(debitTotal);
+  document.querySelector('#totalCredit').textContent = rupiah(creditTotal);
+  document.querySelector('#difference').textContent =
+    `Selisih: ${rupiah(Math.abs(debitTotal - creditTotal))}`;
+
+  const status = document.querySelector('#balanceStatus');
+  if (successMessage) {
+    status.textContent = successMessage;
+    status.className = 'rounded-lg bg-blue-50 p-3 text-sm text-blue-800';
+  } else if (valid) {
+    status.textContent = 'SEIMBANG dan memenuhi pemeriksaan awal voucher kas keluar.';
+    status.className = 'rounded-lg bg-green-50 p-3 text-sm text-green-800';
+  } else {
+    status.textContent = 'Belum valid: seimbangkan jurnal, lengkapi data, dan kreditkan akun kas/bank.';
+    status.className = 'rounded-lg bg-amber-50 p-3 text-sm text-amber-800';
+  }
+  submitButton.disabled = !valid || submitting || Boolean(successMessage);
+}
+
+form.querySelectorAll('#voucherNo, #trxDate, #description').forEach(el => {
+  el.addEventListener('input', userChanged);
+  el.addEventListener('change', userChanged);
+});
+document.querySelector('#addLine').addEventListener('click', () => {
+  successMessage = ''; addRow();
+});
+
+form.addEventListener('submit', async event => {
+  event.preventDefault();
+  recalculate();
+  if (submitButton.disabled) return;
+  const lines = [...lineRows.querySelectorAll('tr')].map(tr => ({
+    accountCode: tr.querySelector('.account').value,
+    memo: tr.querySelector('.memo').value.trim(),
+    debit: Number(tr.querySelector('.debit').value || 0),
+    credit: Number(tr.querySelector('.credit').value || 0)
+  }));
+  const payload = {
+    voucherNo: document.querySelector('#voucherNo').value.trim(),
+    transactionDate: document.querySelector('#trxDate').value,
+    description: document.querySelector('#description').value.trim(),
+    lines
+  };
+
+  submitting = true;
+  form.querySelectorAll('input, select, button').forEach(el => el.disabled = true);
+  document.querySelector('#errorMessage').textContent = '';
+  try {
+    const response = await fetch('/api/vouchers', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.message || 'Voucher ditolak server.');
+    successMessage = `Voucher ${result.voucherNo || payload.voucherNo} berhasil diposting.`;
+    form.reset();
+    lineRows.innerHTML = '';
+    addRow(); addRow();
+  } catch (error) {
+    successMessage = '';
+    document.querySelector('#errorMessage').textContent = error.message;
+  } finally {
+    submitting = false;
+    form.querySelectorAll('input, select, button').forEach(el => el.disabled = false);
+    recalculate();
+  }
+});
+addRow();
+addRow();
+</script>
+</body>
+</html>
